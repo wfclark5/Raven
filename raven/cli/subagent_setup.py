@@ -194,7 +194,8 @@ def _write_private_json(path: Path, data: Any) -> None:
     mode true either way.
     """
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    os.fchmod(fd, 0o600)
+    if hasattr(os, "fchmod"):  # LOCAL PATCH (Windows): no os.fchmod before Python 3.13; os.open's mode already applies
+        os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as stream:
         json.dump(data, stream, indent=2, ensure_ascii=False)
 

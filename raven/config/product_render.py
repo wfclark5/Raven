@@ -584,7 +584,10 @@ def sweep_stale_renders(root: Path) -> None:
     for stale in root.glob(".config.rendered.*.json"):
         try:
             pid = int(stale.name.split(".")[3])
-            os.kill(pid, 0)
+            # LOCAL PATCH (Windows): os.kill(pid, 0) is not a liveness probe on Windows
+            from raven.utils.pid import pid_alive
+            if not pid_alive(pid):
+                raise ProcessLookupError(pid)
         except (IndexError, ValueError, ProcessLookupError):
             stale.unlink(missing_ok=True)
         except PermissionError:
@@ -611,7 +614,8 @@ def write_rendered(config: dict, root: Path, *, own_plugins: Iterable[str] = ())
     inherit_plugin_opt_outs(config, host, own=own_plugins)
     rendered = root / f".config.rendered.{os.getpid()}.json"
     fd = os.open(rendered, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    os.fchmod(fd, 0o600)
+    if hasattr(os, "fchmod"):  # LOCAL PATCH (Windows): no os.fchmod before Python 3.13; os.open's mode already applies
+        os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as stream:
         json.dump(config, stream, indent=2, ensure_ascii=False)
     return rendered

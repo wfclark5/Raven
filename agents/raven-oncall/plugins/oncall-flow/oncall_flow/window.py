@@ -31,12 +31,16 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys  # LOCAL PATCH
 from pathlib import Path
 
 
 def _pid_alive(pid: int) -> bool:
     """Whether a process with this pid exists. The fork borrowed the cron
     service's copy; the plugin owns one so the index needs no host import."""
+    if sys.platform == "win32":  # LOCAL PATCH (Windows): os.kill(pid, 0) is not a liveness probe on Windows
+        from raven.utils.pid import pid_alive
+        return pid_alive(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

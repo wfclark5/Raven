@@ -651,6 +651,12 @@ def serve(args: argparse.Namespace) -> int:
 
     rendered = render_config(Path(args.config).resolve())
     log(f"[run] exec {sys.executable} -m raven acp (config {rendered})")
+    if sys.platform == "win32":
+        # LOCAL PATCH (Windows): execv spawns a detached process and exits this one, so the
+        # pid raven supervises dies at once. Run the server as a child on inherited stdio.
+        import subprocess
+        raise SystemExit(subprocess.call([sys.executable, "-m", "raven", "acp", "--config", str(rendered)],
+                                          stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr))  # explicit: close_fds would drop them
     os.execv(sys.executable, [sys.executable, "-m", "raven", "acp", "--config", str(rendered)])
     raise AssertionError("unreachable: execv does not return")
 

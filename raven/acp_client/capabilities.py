@@ -881,7 +881,9 @@ async def verify_agent(cfg: Any, *, env: dict[str, str] | None = None) -> Capabi
                 f"agent speaks ACP v{handshake.protocol_version}, raven speaks v{protocol.PROTOCOL_VERSION}"
             )
 
-        with tempfile.TemporaryDirectory(prefix="raven_acp_verify_") as tmp:
+        # LOCAL PATCH (Windows): the agent may still hold this as its cwd at cleanup
+
+        with tempfile.TemporaryDirectory(prefix="raven_acp_verify_", ignore_cleanup_errors=True) as tmp:
             try:
                 session = await client.request("session/new", {"cwd": tmp, "mcpServers": []}, timeout=budget)
             except AcpRemoteError as exc:

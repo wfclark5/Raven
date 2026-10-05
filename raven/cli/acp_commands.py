@@ -230,6 +230,13 @@ async def _open_stdin() -> AsyncIterator[asyncio.StreamReader]:
     """
     reader = asyncio.StreamReader(limit=MAX_FRAME_BYTES)
     loop = asyncio.get_running_loop()
+    if sys.platform == "win32":
+        # LOCAL PATCH (Windows): the Proactor loop accepts connect_read_pipe on an
+        # inherited anonymous (non-overlapped) stdin pipe, then dies in the loop
+        # with WinError 6 -- so the request is never read. Use the thread feeder.
+        _spawn_stdin_feeder(reader)
+        yield reader
+        return
     try:
         transport, _ = await loop.connect_read_pipe(lambda: asyncio.StreamReaderProtocol(reader), sys.stdin)
     except (ValueError, OSError) as exc:
@@ -266,6 +273,14 @@ def _spawn_stdin_feeder(reader: asyncio.StreamReader) -> threading.Thread:
     # produced. The fallback is for a stream object that has no ``read1`` at all.
     read = getattr(stream, "read1", None) or stream.read
 
+    if sys.platform == "win32":
+        # LOCAL PATCH (Windows): a blocking ReadFile left pending on a synchronous pipe
+        # handle serialises every other call on that handle -- including the std-handle
+        # queries a C extension's DLL init makes -- so a lazily imported extension
+        # (numpy, in Raven-PPT) deadlocks until stdin delivers data or EOF. Poll with
+        # PeekNamedPipe and read only what is already there, so no read is ever pending.
+        read = _windows_pipe_reader(read)
+
     def _pump() -> None:
         try:
             while True:
@@ -292,6 +307,46 @@ def _spawn_stdin_feeder(reader: asyncio.StreamReader) -> threading.Thread:
     thread = threading.Thread(target=_pump, name="acp-stdin", daemon=True)
     thread.start()
     return thread
+
+
+def _windows_pipe_reader(fallback):
+    """LOCAL PATCH (Windows): a ``read(n)`` over fd 0 that never blocks inside ReadFile.
+
+    Returns ``fallback`` unchanged when stdin is not a pipe (a file or a console),
+    where the blocking read cannot hold up anything else.
+    """
+    import ctypes
+    import msvcrt
+    import time
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    try:
+        handle = msvcrt.get_osfhandle(sys.stdin.fileno())
+    except (OSError, ValueError, AttributeError):
+        return fallback
+    if kernel32.GetFileType(wintypes.HANDLE(handle)) != 3:  # FILE_TYPE_PIPE
+        return fallback
+    peek = kernel32.PeekNamedPipe
+    peek.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p,
+                     ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
+    peek.restype = wintypes.BOOL
+    fd = sys.stdin.fileno()
+
+    def read(n: int) -> bytes:
+        avail = wintypes.DWORD(0)
+        delay = 0.001
+        while True:
+            if not peek(wintypes.HANDLE(handle), None, 0, None, ctypes.byref(avail), None):
+                err = ctypes.get_last_error()
+                logger.debug("acp: stdin PeekNamedPipe failed (winerror {}); treating as EOF", err)
+                return b""  # ERROR_BROKEN_PIPE and friends: the writer is gone -> EOF
+            if avail.value:
+                return os.read(fd, min(n, avail.value))
+            time.sleep(delay)
+            delay = min(delay * 2, 0.02)
+
+    return read
 
 
 __all__ = ["acp_app"]

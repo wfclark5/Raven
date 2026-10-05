@@ -293,10 +293,14 @@ class CliAgentBackend:
         hitting an unrelated process if the launcher's pid was already
         recycled by the OS).
         """
-        try:
-            os.killpg(pgid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        if not hasattr(os, "killpg"):  # LOCAL PATCH (Windows)
+            from raven.utils.pid import kill_tree_windows
+            await asyncio.to_thread(kill_tree_windows, proc.pid)
+        else:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
         if proc.returncode is None:
             await proc.wait()
 
@@ -439,6 +443,9 @@ class CliAgentBackend:
             # CLI reads none of these; a ``raven`` one does.
             env = {**env_base, **host_identity_env(), **subagent_role_env(), **(runtime_env or {}), **self.env}
             logger.info("Subagent [{}] CLI agent {!r}: {}", task_id, self.name, argv[:1])
+            from raven.utils.pid import resolve_windows_command  # LOCAL PATCH (Windows): codex -> codex.cmd
+
+            argv = resolve_windows_command(argv, env)
             proc = await asyncio.create_subprocess_exec(
                 *argv,
                 # Inheriting the parent's stdin (None) would leave it open on a

@@ -9,6 +9,7 @@ operator's allowlist and the workspace fence -- and the execution itself.
 import asyncio
 import fnmatch
 import os
+import sys  # LOCAL PATCH
 import re
 import shlex
 from pathlib import Path
@@ -188,6 +189,20 @@ class ExecTool(Tool):
         # construction -- the registry can be written mid-session, and
         # ``to_schema`` above is what makes the registry serve this live.
         base = "Execute a shell command and return its output. Use with caution."
+        if sys.platform == "win32":
+            # LOCAL PATCH (Windows): name the shell. Without it the model alternates bash,
+            # PowerShell and cmd syntax and most multi-step commands fail.
+            base += (
+                " This host is Windows and commands run in cmd.exe -- not bash, not PowerShell."
+                " Chain with && (not ';'), reference variables as %VAR%, quote with double quotes"
+                " only, use 'type' / 'copy' / 'dir' / 'mkdir', and pass paths with backslashes."
+                " For PowerShell, call it explicitly: powershell -NoProfile -Command \"...\"."
+                " For anything longer than a short one-liner (loops, URLs with & or %, nested"
+                " quotes), write a .py file first and run it as a file, not python -c: use"
+                " raven-python <file>.py where that command exists (it has the deck/image"
+                " libraries), otherwise python <file>.py -- never python3, which is the"
+                " Microsoft Store stub here. LibreOffice (soffice) and Poppler (pdftoppm) are on PATH."
+            )
         from raven.agent.tools.machine_exec import machines_registered
 
         if not machines_registered():

@@ -816,7 +816,8 @@ async def run_test(cfg: Any, *, source: Source) -> TestResult:
         return TestResult(cfg.name, source, "cli", False, probe.detail, None, elapsed())
 
     try:
-        with tempfile.TemporaryDirectory(prefix="raven_subagent_test_") as tmp:
+        # LOCAL PATCH (Windows): the agent may still hold this as its cwd at cleanup
+        with tempfile.TemporaryDirectory(prefix="raven_subagent_test_", ignore_cleanup_errors=True) as tmp:
             backend = build_third_party_backend(
                 cfg,
                 # A stateful create commits a handle binding; a test must not leave
@@ -948,8 +949,14 @@ async def ping_agent(cfg: Any) -> PingResult:
     pool = acp_pool.AcpConnectionPool()
     reply: str | None = None
     failure: Exception | None = None
+    ping_dir: str | None = None
     try:
-        with tempfile.TemporaryDirectory(prefix="raven_subagent_ping_") as tmp:
+        # LOCAL PATCH (Windows): the agent still has this as its cwd when the block exits
+        # (the pool closes in ``finally``), and Windows refuses to delete a directory in
+        # use -- WinError 32 then replaced a successful reply. Tolerate it here and remove
+        # the directory once the pool has closed.
+        with tempfile.TemporaryDirectory(prefix="raven_subagent_ping_", ignore_cleanup_errors=True) as tmp:
+            ping_dir = tmp
             backend = build_third_party_backend(
                 cfg,
                 # A stateful create commits a handle binding; a ping must not leave
@@ -985,6 +992,10 @@ async def ping_agent(cfg: Any) -> PingResult:
         # pool left open holds the child process it launched for the rest of the
         # gateway's life -- one per press.
         await pool.close_all()
+        if ping_dir:  # LOCAL PATCH (Windows): now that nothing runs in it
+            import shutil
+
+            await asyncio.to_thread(shutil.rmtree, ping_dir, True)
 
     if failure is None and (reply or "").strip():
         # Copilot reports a refused model call as the assistant message of a

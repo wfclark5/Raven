@@ -20,7 +20,10 @@ import httpx
 
 from raven.security.network import validate_url_target
 
-JINA_READER_HOST = "https://r.jina.ai"
+import os  # LOCAL PATCH
+
+# LOCAL PATCH: reader overridable (local TinySearch reader); read at import, set before Raven starts
+JINA_READER_HOST = (os.environ.get("RAVEN_JINA_READER_URL") or "https://r.jina.ai").rstrip("/")
 FETCH_TIMEOUT_SECONDS = 30.0
 
 #: Long enough to tell two captures of the same site apart, short enough to sit

@@ -1157,7 +1157,8 @@ class WebSearchTool(Tool):
         """
         if self.provider == "serper":
             return await client.post(
-                "https://google.serper.dev/search",
+                # LOCAL PATCH: overridable so a Serper-compatible local endpoint (TinySearch shim) can serve it
+                os.environ.get("RAVEN_SERPER_SEARCH_URL") or "https://google.serper.dev/search",
                 json=({"q": query, "num": n} if page <= 1 else {"q": query, "num": n, "page": page}),
                 headers={
                     "Accept": "application/json",
@@ -1786,7 +1787,9 @@ class WebFetchTool(Tool):
                 # everything after ``#`` a fragment of the OUTER r.jina.ai URL,
                 # so an SPA route fetched the site root while ``finalUrl``
                 # reported the requested value.
-                return await client.get(f"https://r.jina.ai/{url.replace('#', '%23')}", headers=headers)
+                # LOCAL PATCH: reader overridable (local TinySearch reader)
+                reader = (os.environ.get("RAVEN_JINA_READER_URL") or "https://r.jina.ai").rstrip("/")
+                return await client.get(f"{reader}/{url.replace('#', '%23')}", headers=headers)
 
         return await _send_with_retry(_send, op="fetch_retry", key=url, budget=self._state().retry_budget)
 

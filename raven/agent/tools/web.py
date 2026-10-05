@@ -423,7 +423,8 @@ class WebSearchTool(Tool):
         """One search request, built the way ``vendor`` expects, carrying ``key``."""
         if vendor == "serper":
             return await client.post(
-                "https://google.serper.dev/search",
+                # LOCAL PATCH: overridable so a Serper-compatible local endpoint (TinySearch shim) can serve it
+                os.environ.get("RAVEN_SERPER_SEARCH_URL") or "https://google.serper.dev/search",
                 json={"q": query, "num": n},
                 headers={
                     "Accept": "application/json",
@@ -785,7 +786,8 @@ class ImageSearchTool(Tool):
         auth_json = {"Accept": "application/json", "Content-Type": "application/json"}
         if vendor == "serper":
             return await client.post(
-                "https://google.serper.dev/images",
+                # LOCAL PATCH: overridable so the local SearXNG-backed shim can serve image search
+                os.environ.get("RAVEN_SERPER_IMAGES_URL") or "https://google.serper.dev/images",
                 json={"q": query, "num": n},
                 headers={**auth_json, "X-API-KEY": key},
                 timeout=15.0,
@@ -1164,7 +1166,7 @@ class WebFetchTool(Tool):
             if key:
                 headers["Authorization"] = f"Bearer {key}"
             async with httpx.AsyncClient(timeout=30.0, proxy=self.proxy) as client:
-                r = await client.get(f"https://r.jina.ai/{url}", headers=headers)
+                r = await client.get(f"{(os.environ.get('RAVEN_JINA_READER_URL') or 'https://r.jina.ai').rstrip('/')}/{url}", headers=headers)  # LOCAL PATCH: reader overridable
                 r.raise_for_status()
             return r.text, r.status_code, {}
 

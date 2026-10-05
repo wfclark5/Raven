@@ -85,3 +85,45 @@ def _alive_windows(pid: int) -> bool:
         return kernel32.WaitForSingleObject(handle, 0) == _WAIT_TIMEOUT
     finally:
         kernel32.CloseHandle(handle)
+
+
+# LOCAL PATCH (Windows): no os.killpg / SIGKILL and start_new_session is ignored, so
+# "kill the group" means "kill the tree by pid" -- the same taskkill /T /F that
+# raven/ops/transport.py::_kill_process_tree already uses.
+def kill_tree_windows(pid: int) -> None:
+    import shutil
+    import subprocess
+
+    if pid <= 0:
+        return
+    taskkill = shutil.which("taskkill") or "taskkill"
+    try:
+        subprocess.run([taskkill, "/T", "/F", "/PID", str(pid)], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+# LOCAL PATCH (Windows): CreateProcess does not apply PATHEXT, so a bare "npx" (really
+# npx.cmd) or "codex" (codex.cmd) is "file not found" though a shell would run it.
+def resolve_windows_command(argv: list[str], env: dict | None = None) -> list[str]:
+    import os as _os
+    import sys as _sys
+
+    if _sys.platform != "win32" or not argv:
+        return argv
+    head = argv[0]
+    if _os.path.dirname(head) or _os.path.splitext(head)[1]:
+        return argv  # a path or an explicit extension: CreateProcess handles it as given
+    env = env or _os.environ
+    path = env.get("PATH") or env.get("Path") or _os.environ.get("PATH", "")
+    exts = [e for e in (env.get("PATHEXT") or _os.environ.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD").split(";") if e]
+    for folder in path.split(_os.pathsep):
+        folder = folder.strip().strip('"')
+        if not folder:
+            continue
+        for ext in exts:
+            candidate = _os.path.join(folder, head + ext)
+            if _os.path.isfile(candidate):
+                return [candidate, *argv[1:]]
+    return argv

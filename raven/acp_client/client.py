@@ -247,6 +247,9 @@ class AcpClient:
         # The role goes on before the caller's own map, so a config ``env`` entry
         # is the way to hand one agent back its full registry.
         child_env = {**base_env, **host_identity_env(), **subagent_role_env(), **(env or {})}
+        from raven.utils.pid import resolve_windows_command  # LOCAL PATCH (Windows): npx -> npx.cmd
+
+        argv = resolve_windows_command(argv, child_env)
         try:
             proc = await asyncio.create_subprocess_exec(
                 *argv,
@@ -308,10 +311,14 @@ class AcpClient:
         if self._closed:
             return
         self._closed = True
-        try:
-            os.killpg(self._pgid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
+        if not hasattr(os, "killpg"):  # LOCAL PATCH (Windows)
+            from raven.utils.pid import kill_tree_windows
+            await asyncio.to_thread(kill_tree_windows, self._proc.pid)
+        else:
+            try:
+                os.killpg(self._pgid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
         for task in (self._reader_task, self._stderr_task):
             if task is not None:
                 task.cancel()

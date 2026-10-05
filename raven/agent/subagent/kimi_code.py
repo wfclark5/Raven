@@ -367,8 +367,12 @@ async def _run(cfg: Any, *args: str) -> tuple[int | None, str]:
             return None, ""
         finally:
             if proc.returncode is None:
-                with contextlib.suppress(ProcessLookupError, PermissionError):
-                    os.killpg(proc.pid, signal.SIGKILL)
+                if not hasattr(os, "killpg"):  # LOCAL PATCH (Windows)
+                    from raven.utils.pid import kill_tree_windows
+                    await asyncio.to_thread(kill_tree_windows, proc.pid)
+                else:
+                    with contextlib.suppress(ProcessLookupError, PermissionError):
+                        os.killpg(proc.pid, signal.SIGKILL)
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(proc.wait(), 1.0)
     return proc.returncode, (out + err).decode("utf-8", "replace")

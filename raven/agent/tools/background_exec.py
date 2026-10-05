@@ -188,13 +188,9 @@ def _leads_its_own_group(pid: int) -> bool:
     the existence probe is all there is.
     """
     if not hasattr(os, "getpgid"):
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
-        return True
+        # LOCAL PATCH (Windows): os.kill(pid, 0) is not a liveness probe on Windows
+        from raven.utils.pid import pid_alive
+        return pid_alive(pid)
     try:
         return os.getpgid(pid) == pid
     except (ProcessLookupError, PermissionError, OSError):

@@ -603,7 +603,9 @@ def _scan_folders(root: Path | None) -> Iterator[tuple[Path, dict, Readiness]]:
                 raise ValueError("manifest is not an object")
             for field in _PLACEHOLDER_FIELDS:
                 if template := entry.get(field):
-                    entry[field] = str(template).replace("{SUBAGENT_DIR}", str(folder)).replace("{PYTHON}", python)
+                    # LOCAL PATCH (Windows): templates are later parsed with POSIX shlex.split, which eats
+                    # backslashes; forward slashes are valid Windows paths and survive it.
+                    entry[field] = str(template).replace("{SUBAGENT_DIR}", folder.as_posix()).replace("{PYTHON}", python.replace("\\", "/"))
             _read_route_notes(folder, entry)
         except Exception as exc:  # noqa: BLE001 - one bad folder must not sink the rest
             logger.warning("Skipping the agent product in {}: {}", folder.name, exc)
